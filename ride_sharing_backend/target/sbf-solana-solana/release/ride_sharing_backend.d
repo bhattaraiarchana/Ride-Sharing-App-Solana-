@@ -1,0 +1,1 @@
+/home/moon/ride-sharing-backend/ride_sharing_backend/target/sbf-solana-solana/release/ride_sharing_backend.so: /home/moon/ride-sharing-backend/ride_sharing_backend/programs/ride_sharing_backend/src/lib.rs

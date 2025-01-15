@@ -1,0 +1,3 @@
+channel: v1.18.6
+commit: 2afde1b028ed4593da5b6c735729d8994c4bfac6
+target: x86_64-unknown-linux-gnu

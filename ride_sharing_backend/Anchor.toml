@@ -1,0 +1,23 @@
+[features]
+seeds = false
+skip-lint = false
+
+[programs.localnet]
+ride_sharing_backend = "F8PqJddLMwqQA7tKx6CCL8twfGeDQwV7XbCF1Ppxf5gH"
+
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "http://127.0.0.1:8899"
+wallet = "/home/moon/.config/solana/id.json"
+
+[scripts]
+test = "npx ts-mocha -p ../tsconfig.json -t 1000000 'tests/**/*.ts'"
+
+
+
+[test.validator]
+url = "http://localhost:8900"
+

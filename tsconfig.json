@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es6",
+    "module": "commonjs",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node" , "mocha", "chai" ],
+    "typeRoots": ["./node_modules/@types"],
+    "lib": ["es2015"],
+    "outDir": "./dist"
+  },
+  "include": ["ride_sharing_backend/tests/**/*.ts"],
+  "exclude": ["node_modules", "**/*.d.ts"]
+}
