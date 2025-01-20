@@ -3,12 +3,12 @@ const express = require('express');
 const { Connection, PublicKey, Keypair, SystemProgram } = require('@solana/web3.js');
 const { Program, AnchorProvider, Wallet } = require('@project-serum/anchor');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken'); // For JWT authentication
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const fs = require('fs');
 const { getDistance } = require('geolib');
 const anchor = require('@project-serum/anchor');
-
 
 // Constants for fare calculation
 const baseFare = 50;
@@ -19,7 +19,7 @@ const additionalCharges = 10;
 // Solana connection setup
 const connection = new Connection(process.env.SOLANA_CLUSTER_URL, 'confirmed');
 const walletKeyPair = Keypair.fromSecretKey(
-  Uint8Array.from(JSON.parse(fs.readFileSync(process.env.ANCHOR_WALLET, 'utf8'))),
+  Uint8Array.from(JSON.parse(fs.readFileSync(process.env.ANCHOR_WALLET, 'utf8')))
 );
 const wallet = new Wallet(walletKeyPair);
 const provider = new AnchorProvider(connection, wallet, AnchorProvider.defaultOptions());
@@ -82,22 +82,12 @@ function decrypt(text) {
   return decrypted.toString();
 }
 
-function validateKeypair(keypair) {
-  if (!keypair || !Array.isArray(keypair) || keypair.length !== 64) {
-    throw new Error('Invalid keypair format.');
-  }
-}
-
-function getKeypairFromEncrypted(encryptedKey) {
-  const decryptedKey = decrypt(encryptedKey);
-  const keypairArray = JSON.parse(decryptedKey);
-  validateKeypair(keypairArray);
-  return Keypair.fromSecretKey(Uint8Array.from(keypairArray));
-}
-
 // Express setup
 const app = express();
 app.use(express.json());
+
+// JWT Secret Key
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 
 // Driver Pool: Store available drivers with their locations
 const driverPool = [];
@@ -108,7 +98,7 @@ function calculateFare(pickup, drop, duration) {
   return baseFare + distance * perKmFare + duration * perMinFare + additionalCharges;
 }
 
-// Register a user (Driver or Rider)
+// **Register a User (Driver or Rider)**
 app.post('/register', async (req, res) => {
   try {
     const { name, contact, userType, password } = req.body;
@@ -145,7 +135,54 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// Update driver location
+// **Login Endpoint**
+// **Login Endpoint**
+app.post('/login', async (req, res) => {
+  try {
+    const { username, number, password } = req.body;
+
+    // Validate request
+    if ((!username && !number) || !password) {
+      return res.status(400).json({ message: 'Username/contact and password are required' });
+    }
+
+    // Check if identifier is provided as username or contact
+    const identifier = username || number;
+    console.log("Identifier provided for login:", identifier);
+
+    // Search for the user by either 'name' or 'contact'
+    const user = await User.findOne({ $or: [{ name: identifier }, { contact: identifier }] });
+    console.log("User found:", user);
+
+    // If user is not found, return an error
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Compare passwords
+    const isMatch = await bcrypt.compare(password, user.password);
+    console.log("Password Match:", isMatch);
+
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Generate JWT
+    const token = jwt.sign(
+      { id: user._id, publicKey: user.publicKey, userType: user.userType },
+      JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    res.status(200).json({ message: 'Login successful', token });
+  } catch (error) {
+    console.error('Error during login:', error);
+    res.status(500).json({ message: 'Failed to login', error: error.message });
+  }
+});
+
+
+// **Update Driver Location**
 app.post('/update-location', async (req, res) => {
   try {
     const { driverPublicKey, location } = req.body;
@@ -163,31 +200,22 @@ app.post('/update-location', async (req, res) => {
   }
 });
 
+// **Create a Ride**
 app.post('/create-ride', async (req, res) => {
   try {
     const { riderPublicKey, pickup, drop, startTime, endTime } = req.body;
-
-    // Log debugging information
-    console.log("Received request body:", req.body);
 
     if (!riderPublicKey || !pickup || !drop || !startTime || !endTime) {
       return res.status(400).json({ message: 'Invalid request body. Missing required fields.' });
     }
 
-    // Validate the rider
     const rider = await User.findOne({ publicKey: riderPublicKey, userType: 'Rider' });
     if (!rider) {
       return res.status(404).json({ message: 'Rider not found' });
     }
 
-    // Decrypt rider's private key
     const riderKeypair = getKeypairFromEncrypted(rider.encryptedPrivateKey);
-
-    // Generate unique ID
     const uniqueId = Date.now();
-    console.log("Unique ID:", uniqueId);
-
-    // Derive PDA using matching seeds from the Rust program
     const [rideAccountPublicKey, bump] = await PublicKey.findProgramAddress(
       [
         Buffer.from('ride'),
@@ -196,20 +224,13 @@ app.post('/create-ride', async (req, res) => {
       ],
       program.programId
     );
-    console.log("Derived Ride Account Public Key:", rideAccountPublicKey.toString());
 
-    // Calculate ride details
     const duration = (new Date(endTime) - new Date(startTime)) / (1000 * 60); // Duration in minutes
     const distance = getDistance(pickup, drop) / 1000; // Distance in kilometers
     const fare = calculateFare(pickup, drop, duration);
 
-    console.log("Calculated Distance (km):", distance);
-    console.log("Calculated Duration (minutes):", duration);
-    console.log("Calculated Fare:", fare);
-
-    // Interact with the Solana program
     await program.rpc.createRide(
-      new anchor.BN(uniqueId), // Pass unique ID
+      new anchor.BN(uniqueId),
       new anchor.BN(fare),
       new anchor.BN(distance),
       {
@@ -221,9 +242,7 @@ app.post('/create-ride', async (req, res) => {
         signers: [riderKeypair],
       }
     );
-    console.log("Ride successfully created on Solana.");
 
-    // Save to MongoDB
     const newRide = new Ride({
       rideId: rideAccountPublicKey.toString(),
       rider: riderKeypair.publicKey.toString(),
@@ -238,9 +257,7 @@ app.post('/create-ride', async (req, res) => {
       duration,
     });
     await newRide.save();
-    console.log("Ride saved to MongoDB:", newRide);
 
-    // Send response
     res.status(201).json({ message: 'Ride created successfully', ride: newRide });
   } catch (error) {
     console.error('Error creating ride:', error);
@@ -248,22 +265,20 @@ app.post('/create-ride', async (req, res) => {
   }
 });
 
-// Get Ride Status
+// **Get Ride Status**
 app.get('/ride-status', async (req, res) => {
   try {
-    const { rideId } = req.query; // Use `req.query` for GET request parameters
+    const { rideId } = req.query;
 
     if (!rideId) {
       return res.status(400).json({ message: 'Missing rideId in request' });
     }
 
-    // Find the ride in the database
     const ride = await Ride.findOne({ rideId });
     if (!ride) {
       return res.status(404).json({ message: 'Ride not found' });
     }
 
-    // Return the ride details
     res.status(200).json({ message: 'Ride found', ride });
   } catch (error) {
     console.error('Error fetching ride status:', error);
@@ -271,8 +286,7 @@ app.get('/ride-status', async (req, res) => {
   }
 });
 
-
-// Accept a ride
+// **Accept a Ride**
 app.post('/accept-ride', async (req, res) => {
   try {
     const { rideId, driverPublicKey } = req.body;
@@ -293,7 +307,7 @@ app.post('/accept-ride', async (req, res) => {
   }
 });
 
-// Complete a ride
+// **Complete a Ride**
 app.post('/complete-ride', async (req, res) => {
   try {
     const { rideId } = req.body;
@@ -313,7 +327,7 @@ app.post('/complete-ride', async (req, res) => {
   }
 });
 
-// Cancel a ride
+// **Cancel a Ride**
 app.post('/cancel-ride', async (req, res) => {
   try {
     const { rideId } = req.body;
@@ -333,6 +347,6 @@ app.post('/cancel-ride', async (req, res) => {
   }
 });
 
-// Start the server
+// **Start the Server**
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
