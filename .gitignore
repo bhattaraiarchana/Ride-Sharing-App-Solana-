@@ -4,3 +4,39 @@ solana transfer 9j7v3LH54xks7V3cyvzwR8DBDXvdoo2GYVkfJ1ywY2ca 50000 --url http://
 
 
 pkill -9 solana-test-validator
+
+# Node.js
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# Flutter/Dart
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.dart_tool/
+.pub-cache/
+build/
+
+# Solana / Ledger
+test-ledger/
+
+# Rust
+target/
+
+# Common environment/config
+.env
+*.log
+
+
+
+# Key files - optional for security
+*rsa
+*keypair*.json
+*rider-keypair*
+*driver-keypair*
+
+# macOS / System
+.DS_Store
