@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import '../services/api_service.dart'; // Correct API service path
 
 class RegisterScreen extends StatefulWidget {
+  final ApiService apiService;
+
+  // Constructor to accept apiService
+  const RegisterScreen({Key? key, required this.apiService}) : super(key: key);
+
   @override
   _RegisterScreenState createState() => _RegisterScreenState();
 }
@@ -14,7 +19,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   void _register() async {
     try {
-final apiService = ApiService(baseUrl: "http://localhost:3000/");      final response = await apiService.post('/register', {
+      // Using apiService passed to the widget
+      final response = await widget.apiService.post('/register', body: {
         'name': _nameController.text.trim(),
         'contact': _contactController.text.trim(),
         'password': _passwordController.text.trim(),
@@ -24,7 +30,7 @@ final apiService = ApiService(baseUrl: "http://localhost:3000/");      final res
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(response['message'] ?? 'Registration successful!')),
       );
-      Navigator.pop(context); // Return to login
+      Navigator.pop(context); // Return to login screen
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${e.toString()}')),

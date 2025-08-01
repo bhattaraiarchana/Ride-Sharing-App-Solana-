@@ -1,7 +1,6 @@
-ride_sharing_backend/solana-release-x86_64-unknown-linux-gnu.tar.bz2
-test-ledger/rocksdb*.sst
-test-ledger/validator*.log
+solana transfer 7WgNc9ZTzCBNqCQnRUaCZxLXmjS61J9PB3KYrp3t5q77 1 --from ~/.config/solana/id.json --url https://api.devnet.solana.com
 
-*.log
-*.bz2
-*.tar.xz
+solana transfer 9j7v3LH54xks7V3cyvzwR8DBDXvdoo2GYVkfJ1ywY2ca 50000 --url http://127.0.0.1:8899 --allow-unfunded-recipient
+
+
+pkill -9 solana-test-validator

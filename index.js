@@ -6,9 +6,15 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken'); // For JWT authentication
 const mongoose = require('mongoose');
 const crypto = require('crypto');
+const axios = require('axios');
 const fs = require('fs');
 const { getDistance } = require('geolib');
 const anchor = require('@project-serum/anchor');
+const cors = require('cors'); // Import cors
+const { exec } = require("child_process");
+const app = express(); // Initialize app here
+app.use(cors()); // Use cors middleware after app initialization
+app.use(express.json()); // Parse incoming JSON requests
 
 // Constants for fare calculation
 const baseFare = 50;
@@ -19,7 +25,7 @@ const additionalCharges = 10;
 // Solana connection setup
 const connection = new Connection(process.env.SOLANA_CLUSTER_URL, 'confirmed');
 const walletKeyPair = Keypair.fromSecretKey(
-  Uint8Array.from(JSON.parse(fs.readFileSync(process.env.ANCHOR_WALLET, 'utf8')))
+  Uint8Array.from(JSON.parse(fs.readFileSync(process.env.ANCHOR_WALLET, 'utf8'))),
 );
 const wallet = new Wallet(walletKeyPair);
 const provider = new AnchorProvider(connection, wallet, AnchorProvider.defaultOptions());
@@ -82,10 +88,6 @@ function decrypt(text) {
   return decrypted.toString();
 }
 
-// Express setup
-const app = express();
-app.use(express.json());
-
 // JWT Secret Key
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
 
@@ -97,6 +99,30 @@ function calculateFare(pickup, drop, duration) {
   const distance = getDistance(pickup, drop) / 1000; // Convert to kilometers
   return baseFare + distance * perKmFare + duration * perMinFare + additionalCharges;
 }
+
+// Function to trigger airdrop
+const triggerAirdrop = async (publicKey) => {
+  return new Promise((resolve, reject) => {
+    exec(`solana airdrop 2 ${publicKey}`, (err, stdout, stderr) => {
+      if (err) {
+        reject(`Error: ${stderr}`);
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
+};
+
+// Fetch recent blockhash to use in transaction
+const fetchBlockhash = async () => {
+  try {
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
+    return blockhash;
+  } catch (error) {
+    console.error('Error fetching blockhash:', error);
+    throw new Error('Failed to fetch recent blockhash');
+  }
+};
 
 // **Register a User (Driver or Rider)**
 app.post('/register', async (req, res) => {
@@ -125,6 +151,9 @@ app.post('/register', async (req, res) => {
       driverPool.push({ publicKey, location: null }); // Add the driver to the pool
     }
 
+    // Trigger airdrop for the user when they register
+    await triggerAirdrop(publicKey);
+
     res.status(201).json({
       message: 'User registered successfully',
       publicKey,
@@ -135,8 +164,7 @@ app.post('/register', async (req, res) => {
   }
 });
 
-// **Login Endpoint**
-// **Login Endpoint**
+// login endpoint
 app.post('/login', async (req, res) => {
   try {
     const { username, number, password } = req.body;
@@ -146,13 +174,23 @@ app.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Username/contact and password are required' });
     }
 
-    // Check if identifier is provided as username or contact
+    // Determine if the identifier is username or contact
     const identifier = username || number;
-    console.log("Identifier provided for login:", identifier);
+    console.log('Identifier provided for login:', identifier);
 
-    // Search for the user by either 'name' or 'contact'
-    const user = await User.findOne({ $or: [{ name: identifier }, { contact: identifier }] });
-    console.log("User found:", user);
+    // Search for the user by 'name' or 'contact'
+    const users = await User.find({
+      $or: [{ name: identifier }, { contact: identifier }],
+    });
+
+    // Handle cases where multiple accounts are found
+    if (users.length > 1) {
+      return res.status(400).json({ message: 'Multiple accounts found. Please contact support.' });
+    }
+
+    const user = users[0]; // Take the first user from the array
+
+    console.log('User found:', user);
 
     // If user is not found, return an error
     if (!user) {
@@ -161,44 +199,38 @@ app.post('/login', async (req, res) => {
 
     // Compare passwords
     const isMatch = await bcrypt.compare(password, user.password);
-    console.log("Password Match:", isMatch);
+    console.log('Password Match:', isMatch);
 
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Generate JWT
+    // Generate JWT token
     const token = jwt.sign(
       { id: user._id, publicKey: user.publicKey, userType: user.userType },
-      JWT_SECRET,
+      process.env.JWT_SECRET || 'your_jwt_secret',
       { expiresIn: '1h' }
     );
 
-    res.status(200).json({ message: 'Login successful', token });
+    // Respond with required fields
+    res.status(200).json({
+      message: 'Login successful',
+      token, // Send the JWT token
+      userType: user.userType, // Send user type
+      publicKey: user.publicKey, // Send public key
+    });
   } catch (error) {
     console.error('Error during login:', error);
     res.status(500).json({ message: 'Failed to login', error: error.message });
   }
 });
 
-
-// **Update Driver Location**
-app.post('/update-location', async (req, res) => {
-  try {
-    const { driverPublicKey, location } = req.body;
-
-    const driver = driverPool.find((d) => d.publicKey === driverPublicKey);
-    if (!driver) {
-      return res.status(404).json({ message: 'Driver not found in the pool' });
-    }
-
-    driver.location = location;
-    res.status(200).json({ message: 'Location updated successfully' });
-  } catch (error) {
-    console.error('Error updating location:', error);
-    res.status(500).json({ message: 'Failed to update location', error: error.message });
-  }
-});
+// **Function to decrypt the encrypted private key and return keypair**
+function getKeypairFromEncrypted(encryptedPrivateKey) {
+  const decryptedPrivateKey = decrypt(encryptedPrivateKey); // Decrypt the encrypted key
+  const privateKeyArray = JSON.parse(decryptedPrivateKey); // Parse the decrypted private key
+  return Keypair.fromSecretKey(Uint8Array.from(privateKeyArray)); // Return the keypair
+}
 
 // **Create a Ride**
 app.post('/create-ride', async (req, res) => {
@@ -229,6 +261,10 @@ app.post('/create-ride', async (req, res) => {
     const distance = getDistance(pickup, drop) / 1000; // Distance in kilometers
     const fare = calculateFare(pickup, drop, duration);
 
+    // Fetch the recent blockhash
+    const recentBlockhash = await fetchBlockhash();
+
+    // Create Ride Transaction
     await program.rpc.createRide(
       new anchor.BN(uniqueId),
       new anchor.BN(fare),
@@ -240,6 +276,7 @@ app.post('/create-ride', async (req, res) => {
           systemProgram: SystemProgram.programId,
         },
         signers: [riderKeypair],
+        recentBlockhash: recentBlockhash,
       }
     );
 
@@ -258,10 +295,43 @@ app.post('/create-ride', async (req, res) => {
     });
     await newRide.save();
 
+    // Trigger airdrop for the ride account to ensure it has enough SOL for the transaction
+    await triggerAirdrop(rideAccountPublicKey.toString());
+
     res.status(201).json({ message: 'Ride created successfully', ride: newRide });
   } catch (error) {
     console.error('Error creating ride:', error);
     res.status(500).json({ message: 'Failed to create ride', error: error.message });
+  }
+});
+
+// **Get Route**
+app.post('/get-route', async (req, res) => {
+  const { origin, destination } = req.body;
+
+  try {
+    // Construct the OSRM API URL
+    const url = `https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson`;
+
+    // Fetch the route from OSRM
+    const response = await axios.get(url);
+
+    // Send the route back to the client
+    res.status(200).json({ route: response.data });
+  } catch (error) {
+    console.error('Error fetching route:', error.message);
+    res.status(500).json({ message: 'Error fetching route', error: error.message });
+  }
+});
+
+// **Get Available Rides**
+app.get('/get-available-rides', async (req, res) => {
+  try {
+    const rides = await Ride.find({ status: 'Requested' }); // Fetch rides with status 'Requested'
+    res.status(200).json(rides);
+  } catch (error) {
+    console.error('Error fetching available rides:', error);
+    res.status(500).json({ message: 'Failed to fetch available rides', error: error.message });
   }
 });
 

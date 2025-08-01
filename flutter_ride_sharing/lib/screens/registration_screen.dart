@@ -3,7 +3,9 @@ import '../services/api_service.dart'; // Import ApiService
 import '../services/local_storage.dart';
 
 class RegistrationScreen extends StatefulWidget {
-  const RegistrationScreen({Key? key}) : super(key: key);
+  final ApiService apiService; 
+
+  const RegistrationScreen({Key? key, required this.apiService}) : super(key: key);
 
   @override
   _RegistrationScreenState createState() => _RegistrationScreenState();
@@ -48,7 +50,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
     try {
       // Call the API using ApiService
-      final response = await apiService.post('/register', body);
+final response = await apiService.post('/register', body: body); // Named argument 'body' is required.
       print("Registration successful: $response");
 
       // Save public key and user type locally (if applicable)

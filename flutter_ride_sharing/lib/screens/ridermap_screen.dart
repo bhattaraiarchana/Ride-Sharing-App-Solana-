@@ -4,10 +4,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
-import '../services/local_storage.dart'; // For loading public key and user type
+import '../services/api_service.dart'; // Import the API service
+import '../services/local_storage.dart'; // Import the local_storage.dart file
 
 class RiderMapScreen extends StatefulWidget {
-  const RiderMapScreen({Key? key}) : super(key: key);
+  final ApiService apiService;  // Accept ApiService in the constructor
+
+  const RiderMapScreen({Key? key, required this.apiService}) : super(key: key);
 
   @override
   _RiderMapScreenState createState() => _RiderMapScreenState();
@@ -22,6 +25,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
   List<LatLng> _routeCoordinates = [];
   String? _riderPublicKey; // Rider's public key
   final String backendUrl = "http://localhost:3000/"; // Backend URL
+  bool _isRideCreated = false; // Flag to check if ride is created
 
   @override
   void initState() {
@@ -30,7 +34,6 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
     _getCurrentLocation();
   }
 
-  /// Load the rider's public key from local storage
   Future<void> _loadPublicKey() async {
     final data = await getPublicKeyAndUserType();
     if (data['userType'] == 'Rider') {
@@ -38,38 +41,31 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
         _riderPublicKey = data['publicKey'];
       });
     } else {
-      // Redirect to DriverMapScreen if user is a driver
-      Navigator.of(context).pushReplacementNamed('/driver-map');
+      Navigator.of(context).pushReplacementNamed('/driver-map'); // Redirect if not a rider
     }
   }
 
-  /// Fetch the rider's current location and set it as the pickup location.
   Future<void> _getCurrentLocation() async {
     try {
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
       _currentLocation = LatLng(position.latitude, position.longitude);
-
-      // Reverse geocode to get pickup address
-      final url = Uri.parse(
-          "https://nominatim.openstreetmap.org/reverse?lat=${position.latitude}&lon=${position.longitude}&format=json");
-      final response = await http.get(url);
-
+      final response = await http.get(
+          Uri.parse(
+              "https://nominatim.openstreetmap.org/reverse?lat=${position.latitude}&lon=${position.longitude}&format=json"));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
           _pickupController.text = data['display_name'] ?? "Unknown location";
         });
       }
-
       _mapController.move(_currentLocation, 14.0); // Move map to current location
     } catch (e) {
       print("Error fetching location: $e");
     }
   }
 
-  /// Fetch destination suggestions based on user input.
   Future<void> _searchSuggestions(String query) async {
     if (query.isEmpty) {
       setState(() {
@@ -79,9 +75,10 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
     }
 
     try {
-      final url = Uri.parse(
-          "https://nominatim.openstreetmap.org/search?q=$query&format=json&addressdetails=1&limit=5");
-      final response = await http.get(url);
+      final response = await http.get(
+        Uri.parse(
+            "https://nominatim.openstreetmap.org/search?q=$query&format=json&addressdetails=1&limit=5"),
+      );
 
       if (response.statusCode == 200) {
         final List data = jsonDecode(response.body);
@@ -95,13 +92,11 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
     }
   }
 
-  /// Fetch the route from the pickup to the destination.
   Future<void> _fetchRoute(String destination) async {
     try {
-      // Geocode destination to get coordinates
-      final geocodeUrl = Uri.parse(
-          "https://nominatim.openstreetmap.org/search?q=$destination&format=json&limit=1");
-      final geocodeResponse = await http.get(geocodeUrl);
+      final geocodeResponse = await widget.apiService.get(
+        "https://nominatim.openstreetmap.org/search?q=$destination&format=json&limit=1", // Directly pass the URL
+      );
 
       if (geocodeResponse.statusCode == 200) {
         final List geocodeData = jsonDecode(geocodeResponse.body);
@@ -112,10 +107,9 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
         final destLat = double.parse(geocodeData[0]['lat']);
         final destLon = double.parse(geocodeData[0]['lon']);
 
-        // Fetch route from OSRM
-        final routeUrl = Uri.parse(
-            "https://router.project-osrm.org/route/v1/driving/${_currentLocation.longitude},${_currentLocation.latitude};$destLon,$destLat?overview=full&geometries=geojson");
-        final routeResponse = await http.get(routeUrl);
+        final routeResponse = await widget.apiService.get(
+          "https://router.project-osrm.org/route/v1/driving/${_currentLocation.longitude},${_currentLocation.latitude};$destLon,$destLat?overview=full&geometries=geojson", // Directly pass the URL
+        );
 
         if (routeResponse.statusCode == 200) {
           final data = jsonDecode(routeResponse.body);
@@ -125,7 +119,6 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                 .map((coord) => LatLng(coord[1], coord[0]))
                 .toList();
           });
-          print("Route fetched successfully");
         }
       }
     } catch (e) {
@@ -133,7 +126,6 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
     }
   }
 
-  /// Create a new ride.
   Future<void> _createRide(LatLng pickup, LatLng drop, DateTime startTime, DateTime endTime) async {
     if (_riderPublicKey == null) {
       print("Rider public key is not loaded.");
@@ -141,21 +133,22 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
     }
 
     try {
-      final url = Uri.parse("$backendUrl/create-ride");
-      final response = await http.post(
-        url,
+      final response = await widget.apiService.post(
+        '/create-ride',
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
+        body: {
           "riderPublicKey": _riderPublicKey, // Use dynamic public key
           "pickup": {"lat": pickup.latitude, "lng": pickup.longitude},
           "drop": {"lat": drop.latitude, "lng": drop.longitude},
           "startTime": startTime.toIso8601String(),
           "endTime": endTime.toIso8601String(),
-        }),
+        },
       );
 
       if (response.statusCode == 201) {
-        print("Ride created successfully");
+        setState(() {
+          _isRideCreated = true; // Set flag to show success message
+        });
       } else {
         print("Failed to create ride: ${response.body}");
       }
@@ -206,7 +199,7 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
                     title: Text(_destinationSuggestions[index]),
                     onTap: () async {
                       _destinationController.text = _destinationSuggestions[index];
-                      _destinationSuggestions = [];
+                      _destinationSuggestions = []; // Clear suggestions
                       await _fetchRoute(_destinationController.text);
                     },
                   );
@@ -250,6 +243,14 @@ class _RiderMapScreenState extends State<RiderMapScreen> {
               ],
             ),
           ),
+          if (_isRideCreated)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Text(
+                "Ride Created Successfully!",
+                style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: ElevatedButton(

@@ -4,10 +4,14 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
-import '../services/local_storage.dart'; // For SharedPreferences
+import '../services/api_service.dart'; // Import the API service
+import '../services/local_storage.dart'; // Import the local_storage.dart file
 
 class DriverMapScreen extends StatefulWidget {
-  const DriverMapScreen({Key? key}) : super(key: key);
+  final ApiService apiService;
+
+  // Constructor to accept apiService
+  const DriverMapScreen({Key? key, required this.apiService}) : super(key: key);
 
   @override
   _DriverMapScreenState createState() => _DriverMapScreenState();
@@ -89,7 +93,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
         }).toList());
 
         setState(() {
-          _availableRides = enrichedRides.cast<Map<String, dynamic>>();
+          _availableRides = enrichedRides.cast<Map<String, dynamic>>(); // Update the list with enriched data
         });
       }
     } catch (e) {
@@ -145,7 +149,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
       await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({"rideId": _currentRide!['rideId']}),
+        body: jsonEncode({"rideId": _currentRide!['rideId']}), // Send rideId for completion
       );
       setState(() {
         _currentRide = null;
@@ -162,7 +166,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
       await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({"rideId": _currentRide!['rideId']}),
+        body: jsonEncode({"rideId": _currentRide!['rideId']}), // Send rideId for cancellation
       );
       setState(() {
         _currentRide = null;

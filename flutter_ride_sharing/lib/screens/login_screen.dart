@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/local_storage.dart'; // Correct local storage path
 import '../services/api_service.dart'; // Correct API service path
 import 'forgotpassword_screen.dart';
 import 'ridermap_screen.dart';
@@ -8,7 +7,9 @@ import 'drivermap_screen.dart';
 import 'registration_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key); // Added key for proper widget construction
+  final ApiService apiService;
+
+  const LoginScreen({Key? key, required this.apiService}) : super(key: key);
 
   @override
   _LoginScreenState createState() => _LoginScreenState();
@@ -17,17 +18,21 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  bool _obscurePassword = true; // Password visibility state
-  final ApiService apiService = ApiService(baseUrl: "http://localhost:3000"); // Named parameter
+  bool _obscurePassword = true;
 
-  /// Toggles the visibility of the password
   void _togglePasswordVisibility() {
     setState(() {
       _obscurePassword = !_obscurePassword;
     });
   }
 
-  /// Handles login logic
+  // Method to save publicKey and userType to SharedPreferences
+  Future<void> savePublicKeyAndUserType(String publicKey, String userType) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('publicKey', publicKey);
+    await prefs.setString('userType', userType);
+  }
+
   Future<void> _login() async {
     final usernameOrNumber = _usernameController.text.trim();
     final password = _passwordController.text.trim();
@@ -38,47 +43,43 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     try {
-      print("Sending Login Request...");
-      final response = await apiService.post('/login', {
+      final response = await widget.apiService.post('/login', body: {
         "username": usernameOrNumber,
         "password": password,
       });
 
-      print("Login Response: $response");
-
-      // Extract data from the response
       final token = response['token'];
       final userType = response['userType'];
       final publicKey = response['publicKey'] ?? '';
 
-      // Save the JWT token
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('jwt_token', token);
 
       // Save the public key and user type locally
       await savePublicKeyAndUserType(publicKey, userType);
 
-      // Navigate based on user type
       if (userType == 'Rider') {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => RiderMapScreen()),
+          MaterialPageRoute(
+            builder: (_) => RiderMapScreen(apiService: widget.apiService),
+          ),
         );
       } else if (userType == 'Driver') {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => DriverMapScreen()),
+          MaterialPageRoute(
+            builder: (_) => DriverMapScreen(apiService: widget.apiService),
+          ),
         );
       } else {
         _showErrorDialog('Unknown user type.');
       }
     } catch (e) {
-      print("Login Failed: $e");
       _showErrorDialog(e.toString());
     }
   }
 
-  /// Shows a dialog with an error message
   void _showErrorDialog(String message) {
     showDialog(
       context: context,
@@ -155,7 +156,9 @@ class _LoginScreenState extends State<LoginScreen> {
               onPressed: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => RegistrationScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => RegistrationScreen(apiService: widget.apiService),
+                  ),
                 );
               },
               child: const Text("Don't have an account? Register"),

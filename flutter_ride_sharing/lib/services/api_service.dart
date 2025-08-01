@@ -6,18 +6,29 @@ class ApiService {
 
   ApiService({required this.baseUrl});
 
-  /// POST request method
-  Future<dynamic> post(String endpoint, Map<String, dynamic> body) async {
+  /// Refactored POST request method (with headers and body as named parameters)
+  Future<dynamic> post(String endpoint, {Map<String, String>? headers, Object? body}) async {
     final uri = Uri.parse(baseUrl).resolve(endpoint); // Properly handle URL paths
     final response = await http.post(
       uri,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(body),
+      headers: headers ?? {'Content-Type': 'application/json'}, // Default header if none provided
+      body: body != null ? jsonEncode(body) : null, // Convert body to JSON if it exists
     );
     return _processResponse(response);
   }
 
-  /// GET request method
+  /// New POST request method (with headers and body as named parameters)
+  Future<http.Response> postWithHeadersAndBody(String endpoint, {Map<String, String>? headers, Object? body}) async {
+    final uri = Uri.parse(baseUrl).resolve(endpoint); // Resolve URL path
+    final response = await http.post(
+      uri,
+      headers: headers ?? {'Content-Type': 'application/json'},
+      body: body != null ? jsonEncode(body) : null, // Convert body to JSON if it exists
+    );
+    return response;
+  }
+
+  /// Existing GET request method
   Future<dynamic> get(String endpoint) async {
     final uri = Uri.parse(baseUrl).resolve(endpoint); // Properly handle URL paths
     final response = await http.get(uri);
